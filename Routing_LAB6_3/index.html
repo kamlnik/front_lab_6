@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ToDo List</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    const STORAGE_KEY = 'todos';
+
+    // хранение всех тасков
+    function loadTodos() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return [];
+        const todos = JSON.parse(raw);
+        return todos
+          .filter(todo => {
+            const id = Number(todo.id);
+            return !isNaN(id) && typeof todo.text === 'string';
+          })
+          .map(todo => ({
+            id: Number(todo.id),
+            text: todo.text || '',
+            completed: Boolean(todo.completed)
+          }));
+      } catch (e) {
+        console.error('loadTodos error:', e);
+        return [];
+      }
+    }
+
+    function saveTodos(todos) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(todos));
+    }
+
+    function generateId() {
+      const todos = loadTodos();
+      if (todos.length === 0) return 1;
+      const maxId = Math.max(...todos.map(t => t.id));
+      return maxId + 1;
+    }
+
+    // рендеринг
+    const app = document.getElementById('app');
+    if (!app) console.error('Element #app not found!');
+
+    function renderList() {
+      const todos = loadTodos();
+      let html = `<nav><a href="/">Все задачи</a> <a href="/add">Добавить</a> <a href="/about">О нас</a></nav>`;
+      html += `<h1>ToDo List</h1>`;
+
+      if (todos.length === 0) {
+        html += `<p class="empty-message">Нет задач. Добавьте первую!</p>`;
+        app.innerHTML = html;
+        return;
+      }
+
+      html += `<ul class="todo-list">`;
+      todos.forEach(todo => {
+        const completedClass = todo.completed ? 'class="completed"' : '';
+        html += `<li ${completedClass}>
+          <input type="checkbox" data-id="${todo.id}" ${todo.completed ? 'checked' : ''}>
+          <span><a href="/${todo.id}">${escapeHtml(todo.text)}</a></span>
+          <button class="delete-btn" data-id="${todo.id}">🗑️</button>
+        </li>`;
+      });
+      html += `</ul>`;
+      app.innerHTML = html;
+
+      document.querySelectorAll('.todo-list input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', (e) => {
+          const id = Number(e.target.getAttribute('data-id'));
+          toggleTodo(id);
+        });
+      });
+
+      document.querySelectorAll('.todo-list .delete-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const id = Number(e.target.getAttribute('data-id'));
+          deleteTodo(id);
+        });
+      });
+    }
+
+    function renderTaskView(id) {
+      const todos = loadTodos();
+      const todo = todos.find(t => t.id === id);
+      if (!todo) {
+        app.innerHTML = `<h2>Задача не найдена</h2><p><a href="/">На главную</a></p>`;
+        return;
+      }
+
+      let html = `<nav><a href="/">Все задачи</a> <a href="/add">Добавить</a> <a href="/about">О нас</a></nav>`;
+      html += `<h1>Задача №${todo.id}</h1>`;
+      html += `<div class="todo-detail">
+        <label>
+          <input type="checkbox" id="detail-checkbox" ${todo.completed ? 'checked' : ''} data-id="${todo.id}">
+          <span class="${todo.completed ? 'completed-text' : ''}">${escapeHtml(todo.text)}</span>
+        </label>
+        <div style="margin-top: 20px;">
+          <button id="delete-task-btn" data-id="${todo.id}">🗑️ Удалить</button>
+        </div>
+      </div>`;
+      app.innerHTML = html;
+
+      document.getElementById('detail-checkbox').addEventListener('change', (e) => {
+        const id = Number(e.target.getAttribute('data-id'));
+        toggleTodo(id);
+      });
+
+      document.getElementById('delete-task-btn').addEventListener('click', (e) => {
+        const id = Number(e.target.getAttribute('data-id'));
+        deleteTodo(id);
+      });
+    }
+
+    function renderAddForm() {
+      let html = `<nav><a href="/">Все задачи</a> <a href="/add">Добавить</a> <a href="/about">О нас</a></nav>`;
+      html += `<h1>Новая задача</h1>`;
+      html += `<div class="add-todo">
+        <input type="text" id="todo-input" placeholder="Новая задача..." autofocus>
+        <button id="add-btn">+ Добавить</button>
+      </div>`;
+      app.innerHTML = html;
+
+      const input = document.getElementById('todo-input');
+      const addBtn = document.getElementById('add-btn');
+
+      const addTodoHandler = () => {
+        const text = input.value.trim();
+        if (!text) return;
+        const todos = loadTodos();
+        todos.push({
+          id: generateId(),
+          text,
+          completed: false
+        });
+        saveTodos(todos);
+        navigateTo('/');
+      };
+
+      addBtn.addEventListener('click', addTodoHandler);
+      input.addEventListener('keyup', (e) => {
+        if (e.key === 'Enter') addTodoHandler();
+      });
+    }
+
+    function renderAbout() {
+      app.innerHTML = `
+        <nav>
+          <a href="/">Все задачи</a>
+          <a href="/add">Добавить</a>
+          <a href="/about">О нас</a>
+        </nav>
+        <h1>О нас</h1>
+        <p>Это простой Todo List на чистом JavaScript с маршрутизацией на History API.</p>
+        <p>Данные хранятся в LocalStorage.</p>
+      `;
+    }
+
+    function toggleTodo(id) {
+      const todos = loadTodos();
+      const todo = todos.find(t => t.id === id);
+      if (!todo) return;
+      todo.completed = !todo.completed;
+      saveTodos(todos);
+      if (location.pathname === `/${id}`) {
+        renderTaskView(id);
+      } else {
+        renderList();
+      }
+    }
+
+    function deleteTodo(id) {
+      let todos = loadTodos();
+      todos = todos.filter(t => t.id !== id);
+      saveTodos(todos);
+      navigateTo('/');
+    }
+
+    function escapeHtml(text) {
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // роутинг
+    function navigateTo(path) {
+      history.pushState(null, '', path);
+      handleRoute();
+    }
+
+    function handleRoute() {
+      const path = location.pathname;
+      console.log('Route:', path);
+
+      const deleteMatch = path.match(/^\/(\d+)\/delete$/);
+      if (deleteMatch) {
+        const id = parseInt(deleteMatch[1], 10);
+        let todos = loadTodos();
+        const existed = todos.some(t => t.id === id);
+        if (existed) {
+          todos = todos.filter(t => t.id !== id);
+          saveTodos(todos);
+        }
+        app.innerHTML = `
+          <div class="action-message">
+            <p>Task deleted</p>
+            <p><a href="/">← Вернуться к списку</a></p>
+          </div>`;
+        return;
+      }
+
+      const completeMatch = path.match(/^\/(\d+)\/complete$/);
+      if (completeMatch) {
+        const id = parseInt(completeMatch[1], 10);
+        const todos = loadTodos();
+        const todo = todos.find(t => t.id === id);
+        if (todo) {
+          todo.completed = !todo.completed;
+          saveTodos(todos);
+        }
+        app.innerHTML = `
+          <div class="action-message">
+            <p>Task status has been changed</p>
+            <p><a href="/">← Вернуться к списку</a></p>
+          </div>`;
+        return;
+      }
+
+      const detailMatch = path.match(/^\/(\d+)$/);
+      if (detailMatch) {
+        const id = parseInt(detailMatch[1], 10);
+        renderTaskView(id);
+        return;
+      }
+
+      if (path === '/' || path === '') {
+        renderList();
+      } else if (path === '/add') {
+        renderAddForm();
+      } else if (path === '/about') {
+        renderAbout();
+      } else {
+        app.innerHTML = `<h2>404 — Страница не найдена</h2><p><a href="/">На главную</a></p>`;
+      }
+    }
+
+    document.body.addEventListener('click', (e) => {
+      const link = e.target.closest('a[href^="/"]');
+      if (!link || link.target === '_blank' || link.getAttribute('href').startsWith('http')) return;
+      e.preventDefault();
+      navigateTo(link.getAttribute('href'));
+    });
+
+    window.addEventListener('popstate', handleRoute);
+    handleRoute();
+  </script>
+</body>
+</html>
