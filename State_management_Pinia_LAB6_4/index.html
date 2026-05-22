@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ToDo List — Pinia</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://unpkg.com/vue-demi@0.14.6/lib/index.iife.js"></script>
+  <script src="https://unpkg.com/pinia@2/dist/pinia.iife.js"></script>
+  <script src="https://unpkg.com/vue-router@4/dist/vue-router.global.js"></script>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    const { createPinia, defineStore } = Pinia;
+    const { createApp, ref, computed, watch } = Vue;
+    const { createRouter, createWebHistory } = VueRouter;
+
+    const STORAGE_KEY = 'todos_pinia';
+
+    function loadFromStorage() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return [];
+        const todos = JSON.parse(raw);
+        return todos.filter(t => typeof t.id === 'number' && typeof t.text === 'string')
+                    .map(t => ({ id: t.id, text: t.text, completed: !!t.completed }));
+      } catch(e) { return []; }
+    }
+
+    function saveToStorage(todos) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(todos));
+    }
+
+    function generateId(todos) {
+      if (!todos.length) return 1;
+      return Math.max(...todos.map(t => t.id)) + 1;
+    }
+
+    const useTodoStore = defineStore('todos', {
+      state: () => ({ todos: [] }),
+      actions: {
+        loadTodos() { this.todos = loadFromStorage(); },
+        persist() { saveToStorage(this.todos); },
+        addTodo(text) {
+          if (!text.trim()) return;
+          this.todos.push({ id: generateId(this.todos), text: text.trim(), completed: false });
+          this.persist();
+        },
+        toggleTodo(id) {
+          const todo = this.todos.find(t => t.id === id);
+          if (todo) { todo.completed = !todo.completed; this.persist(); }
+        },
+        deleteTodo(id) {
+          const idx = this.todos.findIndex(t => t.id === id);
+          if (idx !== -1) { this.todos.splice(idx, 1); this.persist(); }
+        }
+      }
+    });
+
+    const TodoList = {
+      template: `
+        <div>
+          <h1>ToDo List</h1>
+          <div v-if="todos.length === 0" class="empty-message">Нет задач. Добавьте первую!</div>
+          <ul v-else class="todo-list">
+            <li v-for="todo in todos" :key="todo.id" :class="{ completed: todo.completed }">
+              <input type="checkbox" :checked="todo.completed" @change="() => toggle(todo.id)">
+              <span><router-link :to="'/' + todo.id">{{ escapeHtml(todo.text) }}</router-link></span>
+              <button class="delete-btn" @click="() => remove(todo.id)">🗑️</button>
+            </li>
+          </ul>
+        </div>
+      `,
+      setup() {
+        const store = useTodoStore();
+        const escapeHtml = (text) => String(text).replace(/[&<>]/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' })[m]);
+        return {
+          todos: computed(() => store.todos),
+          toggle: (id) => store.toggleTodo(id),
+          remove: (id) => store.deleteTodo(id),
+          escapeHtml
+        };
+      }
+    };
+
+    const TodoAdd = {
+      template: `<div><h1>Новая задача</h1><div class="add-todo"><input type="text" v-model="text" @keyup.enter="add" placeholder="Новая задача..."><button @click="add">+ Добавить</button></div></div>`,
+      setup() {
+        const store = useTodoStore();
+        const text = ref('');
+        const router = VueRouter.useRouter();
+        const add = () => { if (text.value.trim()) { store.addTodo(text.value); text.value = ''; router.push('/'); } };
+        return { text, add };
+      }
+    };
+
+    const About = {
+      template: `<div><h1>О нас</h1><p>TodoList на Vue 3 + Pinia. Данные в LocalStorage. Состояние через Pinia store.</p></div>`
+    };
+
+    const TodoDetail = {
+      template: `
+        <div>
+          <h1>Задача №{{ todo?.id }}</h1>
+          <div v-if="todo" class="todo-detail">
+            <label><input type="checkbox" :checked="todo.completed" @change="toggleDetail"><span :class="{ 'completed-text': todo.completed }">{{ todo.text }}</span></label>
+            <div style="margin-top:20px"><button @click="removeDetail">🗑️ Удалить</button></div>
+          </div>
+          <div v-else><p>Задача не найдена</p><router-link to="/">На главную</router-link></div>
+        </div>
+      `,
+      props: ['id'],
+      setup(props) {
+        const store = useTodoStore();
+        const router = VueRouter.useRouter();
+        const todo = computed(() => store.todos.find(t => t.id === Number(props.id)));
+        const toggleDetail = () => { if (todo.value) store.toggleTodo(todo.value.id); };
+        const removeDetail = () => { if (todo.value) { store.deleteTodo(todo.value.id); router.push('/'); } };
+        return { todo, toggleDetail, removeDetail };
+      }
+    };
+
+    const DeleteHandler = {
+      template: `<div class="action-message"><p>Задача удаляется...</p><p><router-link to="/">← Вернуться к списку</router-link></p></div>`,
+      setup() {
+        const route = VueRouter.useRoute();
+        const store = useTodoStore();
+        const router = VueRouter.useRouter();
+        const id = Number(route.params.id);
+        
+        const performDelete = () => {
+          if (!isNaN(id)) {
+            const existed = store.todos.some(t => t.id === id);
+            if (existed) {
+              store.deleteTodo(id);
+              console.log(` Задача ${id} удалена`);
+            } else {
+              console.warn(` Задача ${id} не найдена`);
+            }
+          }
+          // переход на главную через 1.5 секунды
+          setTimeout(() => router.push('/'), 1500);
+        };
+
+        if (store.todos.length > 0) {
+          performDelete();
+        } else {
+          const stopWatch = watch(() => store.todos.length, (len) => {
+            if (len > 0) {
+              performDelete();
+              stopWatch();
+            }
+          });
+          setTimeout(() => {
+            stopWatch();
+            performDelete();
+          }, 1000);
+        }
+        
+        return {};
+      }
+    };
+
+    const App = { template: `<div><nav><router-link to="/">Все задачи</router-link><router-link to="/add">Добавить</router-link><router-link to="/about">О нас</router-link></nav><router-view /></div>` };
+
+    const routes = [
+      { path: '/', component: TodoList },
+      { path: '/add', component: TodoAdd },
+      { path: '/about', component: About },
+      { path: '/:id(\\d+)', component: TodoDetail, props: true },
+      { path: '/:id(\\d+)/delete', component: DeleteHandler }
+    ];
+
+    const router = createRouter({ history: createWebHistory(), routes });
+    const app = createApp(App);
+    app.use(createPinia());
+    app.use(router);
+    // Гарантируем загрузку данных перед стартом
+    router.isReady().then(() => {
+      const store = useTodoStore();
+      store.loadTodos();
+    });
+    app.mount('#app');
+  </script>
+</body>
+</html>
